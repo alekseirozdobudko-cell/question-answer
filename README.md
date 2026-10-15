@@ -1,13 +1,23 @@
 # Question and Answer — Вопрос–Ответ
 
-Тренировка слуха на четырёхструнном басу E–A–D–G. Expo / React Native, Android (Expo Go) и браузер. SDK 57, как в текущем проекте Ear Trainer.
+Приложение для тренировки музыкального слуха: бас-гитара, акустическая гитара, два синтезатора и пианино. Expo / React Native, Android и браузер, SDK 57.
+
+## Скачать
+
+[Последний релиз](https://github.com/alekseirozdobudko-cell/question-answer/releases/latest) содержит:
+
+- `Question-and-Answer.apk` — приложение для прямой установки на Android без Expo Go. Это предварительная сборка с тестовой подписью, не для Google Play.
+- `Question-and-Answer.html` — браузерная версия одним файлом: скачайте и откройте в современном браузере.
+- `Question-and-Answer-web.zip` — статическая веб-сборка для размещения на HTTP-сервере.
+
+Приложение не записывает микрофон и не оценивает исполнение. Встроенные звуки работают без внешнего сервера.
 
 ## Запуск
 
 Нужны Node.js 22+ и Expo Go, поддерживающий SDK 57.
 
 ```powershell
-npm install
+npm ci
 npm run start
 ```
 
@@ -42,4 +52,4 @@ npm run export:web
 npm run export:android
 ```
 
-`scripts/prepare-samples.mjs` воспроизводимо готовит src/samples.json из WAV-файлов. Изменения исходных записей не нужны. `dist/` после экспорта — статическая веб-сборка, её нужно открыть через HTTP-сервер.
+`scripts/prepare-samples.mjs` воспроизводимо готовит src/samples.json из WAV-файлов. Изменения исходных записей не нужны. `dist/` после экспорта — статическая веб-сборка, её нужно открыть через HTTP-сервер. Экспорт также создаёт самостоятельный файл `../outputs/Question-and-Answer.html`. Инструкция по APK — в [ANDROID.md](ANDROID.md).

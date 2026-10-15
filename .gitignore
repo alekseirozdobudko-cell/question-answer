@@ -9,3 +9,9 @@ work/
 Guitar.mono.1644.1.zip
 scripts/prepare-iowa-samples.mjs
 *.log
+android/
+ios/
+*.apk
+*.aab
+*.jks
+*.keystore
