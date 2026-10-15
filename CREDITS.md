@@ -8,7 +8,7 @@ Collection and editing: **tonejs-instruments, Nicholaus P. Brosowsky and contrib
 - Sample license declared by collection: Creative Commons Attribution 3.0 Unported, https://creativecommons.org/licenses/by/3.0/
 - Original sample provider: https://www.karoryfer.com/karoryfer-samples
 
-The original WAV files are in assets/. The included source catalogue is preserved unchanged.
+The original WAV files are in `assets/bass/`.
 Application adaptations: mono signed PCM at 22050 Hz, truncation to six seconds; linear-interpolation pitch shifting to adjacent notes, amplitude envelopes and mixing during playback. The bass is recorded, not synthesized. Metronome clicks are synthesized by this application.
 
 Retain this credit and the license link when redistributing the samples or the application.
