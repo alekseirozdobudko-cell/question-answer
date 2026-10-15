@@ -1,0 +1,12 @@
+const fs=require('node:fs');
+const path=require('node:path');
+const project=path.resolve(__dirname,'..');
+const output=path.resolve(project,'..','outputs','Question-and-Answer.html');
+const html=fs.readFileSync(path.join(project,'dist','index.html'),'utf8');
+const match=html.match(/<script src="([^"]+)" defer><\/script>/);
+if(!match)throw new Error('Expo web bundle script was not found. Run npm run export:web first.');
+const bundlePath=path.resolve(project,'dist',match[1].replace(/^\//,''));
+const bundle=fs.readFileSync(bundlePath,'utf8').replace(/<\/script/gi,'<\\/script');
+const standalone=html.replace('lang="en"','lang="ru"').replace(match[0],()=>'<script>'+bundle+'</script>');
+fs.mkdirSync(path.dirname(output),{recursive:true});fs.writeFileSync(output,standalone);
+console.log('Standalone app written to '+output);

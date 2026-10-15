@@ -1,0 +1,11 @@
+node_modules/
+.expo/
+dist/
+android-dist/
+work/
+.tmp-*/
+.env.local
+.env.*.local
+Guitar.mono.1644.1.zip
+scripts/prepare-iowa-samples.mjs
+*.log
