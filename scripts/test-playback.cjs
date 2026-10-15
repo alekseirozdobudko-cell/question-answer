@@ -4,7 +4,7 @@ const path=require('node:path');
 const vm=require('node:vm');
 const {createRequire}=require('node:module');
 const ts=require('typescript');
-const {DEFAULTS}=require('../src/music.ts');
+const {DEFAULTS,pool}=require('../src/music.ts');
 const {SAMPLE_RATE}=require('../src/render.ts');
 
 function loadAudio(file,mocks,globals){
@@ -20,6 +20,16 @@ const chunk=()=>({phrase:next(),pcm:new Float32Array(SAMPLE_RATE)});
 const mockSequence={'./sequence':{createSequenceRenderer:()=>chunk}};
 
 async function test(){
+ const pianoSettings={...settings,instrument:'piano'},decoded=new Map();
+ const pianoBank=Object.fromEntries(pool(pianoSettings).map(note=>[note.midi,{
+  *[Symbol.iterator](){decoded.set(note.midi,(decoded.get(note.midi)??0)+1);yield* 'AAA=';}
+ }]));
+ const sampleRenderer=loadAudio('render.ts',{'./samples.json':{},'./pianoSamples.json':pianoBank},{});
+ sampleRenderer.prepareSamples(pianoSettings);
+ for(const note of pool(pianoSettings))assert.equal(decoded.get(note.midi),1,'all selectable piano keys are decoded before playback');
+ sampleRenderer.render({beats:4,events:pool(pianoSettings).map((note,beat)=>({beat,duration:1,note}))},pianoSettings);
+ sampleRenderer.prepareSamples(pianoSettings);
+ assert.ok([...decoded.values()].every(count=>count===1),'rendering and subsequent starts reuse the prepared piano samples');
  let tick,sources=[];
  class Context{
   constructor(){this.currentTime=0;this.destination={};Context.instance=this;}
@@ -41,7 +51,7 @@ async function test(){
  const lateStop=web.playSequence(settings,{next,phrase(){},progress(){},error:e=>errors.push(e)});
  Context.instance.currentTime+=10;tick();assert.equal(errors.length,1,'an underrun reports an error and stops');lateStop();
 
- let pending,playlist,files=new Set(),created=0;
+ let pending,startup,playlist,files=new Set(),created=0;
  class File{
   constructor(root,name){this.uri=name;}
   create(){files.add(this.uri);}
@@ -52,7 +62,7 @@ async function test(){
   ...mockSequence,
   'expo-file-system':{File,Paths:{cache:'cache'}},
   'expo-audio':{setAudioModeAsync:async()=>{},createAudioPlaylist:options=>{
-   created++;playlist={sources:[...options.sources],currentIndex:0,currentTime:0,
+   created++;playlist={sources:[...options.sources],currentIndex:0,currentTime:0,isLoaded:false,isBuffering:true,currentStatus:{},
     addListener(event,listener){this.listener=listener;return {remove:()=>{this.listener=undefined;}};},
     add(source){this.sources.push(source);},remove(index){this.sources.splice(index,1);this.currentIndex--;},
     play(){this.playing=true;},clear(){this.playing=false;this.sources=[];},destroy(){this.destroyed=true;},release(){this.released=true;}
@@ -60,9 +70,15 @@ async function test(){
   }}
  };
  nativeMocks['./audio-native']=loadAudio('audio-native.ts',nativeMocks,{});
- const native=loadAudio('audio.android.ts',nativeMocks,{setTimeout:fn=>(pending=fn,1),clearTimeout:()=>{pending=undefined;}});
+ const native=loadAudio('audio.android.ts',nativeMocks,{setTimeout:(fn,ms)=>ms===10000?(startup=fn,2):(pending=fn,1),clearTimeout:id=>{if(id===2)startup=undefined;else if(id===1)pending=undefined;}});
  seen=[];errors=[];
  const nativeStop=native.playSequence(settings,{next,phrase:p=>seen.push(p.id),progress(){},error:e=>errors.push(e)});
+ assert.equal(seen.length,0,'the first phrase stays in loading state until native audio is ready');
+ assert.ok(!playlist.playing,'playback must not start while the initial source is loading');
+ playlist.isLoaded=true;playlist.listener({});
+ assert.ok(!playlist.playing,'a loaded but still buffering source must not start');
+ playlist.isBuffering=false;playlist.listener({});
+ assert.equal(seen.length,1);assert.ok(playlist.playing);assert.equal(startup,undefined);
  for(let boundary=1;boundary<=20;boundary++){
   playlist.currentIndex=1;playlist.listener({currentIndex:1,currentTime:0});
   const maintain=pending;pending=undefined;maintain();
@@ -77,6 +93,12 @@ async function test(){
  assert.ok(playlist.released&&playlist.destroyed&&!playlist.playing,'stop releases the native player');
  assert.equal(files.size,0,'stop deletes all temporary audio files');
  assert.equal(pending,undefined);
- console.log('Browser scheduling and native queue: 20 transitions, stale events, underrun handling and resource cleanup validated.');
+ const waitingStop=native.playSequence(settings,{next,phrase(){throw new Error('Cancelled startup must never announce a phrase');},progress(){},error:e=>errors.push(e)});
+ const staleListener=playlist.listener;waitingStop();playlist.isLoaded=true;playlist.isBuffering=false;staleListener({});
+ assert.ok(!playlist.playing);assert.equal(files.size,0);assert.equal(startup,undefined);
+ native.playSequence(settings,{next,phrase(){},progress(){},error:e=>errors.push(e)});
+ const startupTimeout=startup;startupTimeout();
+ assert.equal(errors.length,1,'a player that never becomes ready reports an error');assert.equal(files.size,0);
+ console.log('Playback validated: prepared piano keys, native readiness, startup cancellation/timeout, 20 transitions and resource cleanup.');
 }
 test().catch(error=>{console.error(error);process.exitCode=1;});

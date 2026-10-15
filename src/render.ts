@@ -1,6 +1,6 @@
 import samples from './samples.json';
 import pianoSamples from './pianoSamples.json';
-import type { Phrase, Settings } from './music';
+import {pool,type Phrase,type Settings} from './music';
 export const SAMPLE_RATE=22050;
 const alphabet='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
 function decode(base64: string) {
@@ -17,6 +17,12 @@ function pianoSample(midi:number):Float32Array|undefined {
   const encoded=pianoBank[String(midi)];if(!encoded)return undefined;
   let pcm=pianoCache.get(midi);if(!pcm){pcm=decode(encoded);pianoCache.set(midi,pcm)}
   return pcm;
+}
+
+// Settings stay fixed during playback. Decode every playable piano key while
+// the app is still preparing, never on its first occurrence in a live phrase.
+export function prepareSamples(settings:Settings){
+  if(settings.instrument==='piano')for(const note of pool(settings))pianoSample(note.midi);
 }
 
 // A self-contained Karplus–Strong plucked-string model keeps the acoustic-guitar
