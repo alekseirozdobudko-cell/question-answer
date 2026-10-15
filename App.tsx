@@ -6,7 +6,7 @@ import * as audio from './src/audio';
 import {readSettings,writeSettings} from './src/storage';
 
 const C={bg:'#F5F4EE',ink:'#232B27',muted:'#778078',line:'#E0E3D9',green:'#D7F27A',deep:'#224F42',paper:'#FFFFFF',amber:'#E9B967'};
-type Bundle={phrase:Phrase;settings:Settings;prepared:audio.Prepared};
+type Bundle={phrase:Phrase;settings:Settings};
 function Chip({label,selected,onPress,disabled=false}:{label:string;selected?:boolean;onPress:()=>void;disabled?:boolean}){
   return <Pressable accessibilityRole="button" accessibilityState={{selected,disabled}} disabled={disabled} onPress={onPress} style={({pressed})=>[styles.chip,selected&&styles.chipSelected,pressed&&{opacity:.65},disabled&&{opacity:.5}]}><Text style={[styles.chipText,selected&&{color:C.deep}]}>{label}</Text></Pressable>;
 }
@@ -19,16 +19,14 @@ export default function App(){
   const [phrase,setPhrase]=useState<Phrase|null>(null),[phase,setPhase]=useState<'idle'|'loading'|'question'|'answer'>('idle');
   const [elapsed,setElapsed]=useState(0),[count,setCount]=useState(0),[showSettings,setShowSettings]=useState(false),[error,setError]=useState(''),[canGoPrevious,setCanGoPrevious]=useState(false);
   const [picker,setPicker]=useState<'chord'|'scale'|null>(null),[credits,setCredits]=useState(false);
-  const active=useRef(false),session=useRef(0),stopSound=useRef<(()=>void)|null>(null),stopDrone=useRef<(()=>void)|null>(null),current=useRef<Bundle|null>(null),next=useRef<Bundle|null>(null),queueTimer=useRef<ReturnType<typeof setTimeout>|null>(null),history=useRef<Phrase[]>([]);
+  const active=useRef(false),session=useRef(0),stopSound=useRef<(()=>void)|null>(null),stopDrone=useRef<(()=>void)|null>(null),current=useRef<Bundle|null>(null),history=useRef<Phrase[]>([]);
   const running=phase!=='idle';const problem=rangeError(settings), available=pool(settings), form=formula(settings);
   const update=(patch:Partial<Settings>)=>{if(!active.current)setSettings(s=>({...s,...patch}));};
   useEffect(()=>{writeSettings(settings);},[settings]);
   useEffect(()=>{setPhrase(null);setCount(0);},[settings]);
   function clearPlayback(includeDrone=true){
-    if(queueTimer.current)clearTimeout(queueTimer.current);queueTimer.current=null;
     stopSound.current?.();stopSound.current=null;
-    if(current.current){audio.dispose(current.current.prepared);current.current=null;}
-    if(next.current){audio.dispose(next.current.prepared);next.current=null;}
+    current.current=null;
     if(includeDrone){stopDrone.current?.();stopDrone.current=null;}
   }
   function stop(){active.current=false;session.current++;clearPlayback();setPhase('idle');setElapsed(0);}
@@ -38,35 +36,39 @@ export default function App(){
     if(Platform.OS==='web')document.addEventListener('visibilitychange',hidden);
     return ()=>{active.current=false;session.current++;clearPlayback();sub.remove();if(Platform.OS==='web')document.removeEventListener('visibilitychange',hidden);};
   },[]);
-  function makeBundle(s:Settings,p?:Phrase):Bundle {const phrase=p??generate(s);return{phrase,settings:s,prepared:audio.prepare(phrase,s)};}
-  function playBundle(bundle:Bundle,token:number,isRepeat=false,recordHistory=true){
-    if(!active.current||token!==session.current){audio.dispose(bundle.prepared);return;}
-    current.current=bundle;setPhrase(bundle.phrase);setElapsed(0);setPhase('question');if(!isRepeat)setCount(n=>n+1);
-    stopSound.current=audio.play(bundle.prepared,seconds=>{
-      if(token!==session.current)return;setElapsed(seconds);setPhase(bundle.settings.infiniteMelody||seconds<bundle.phrase.beats*60/bundle.settings.bpm?'question':'answer');
-    },()=>{
-      if(!active.current||token!==session.current)return;
-      stopSound.current=null;audio.dispose(bundle.prepared);current.current=null;
-      if(recordHistory){history.current.push(bundle.phrase);if(history.current.length>50)history.current.shift();setCanGoPrevious(history.current.length>0);}
-      try{const following=next.current??makeBundle(bundle.settings);next.current=null;playBundle(following,token);}catch(e){fail(e);}
+  function playSequence(s:Settings,token:number,initial?:Phrase,isRepeat=false,recordHistory=true,following?:Phrase){
+    let pending=initial,queued=following,first=true,recordCurrent=recordHistory;
+    stopSound.current=audio.playSequence(s,{
+      next:()=>{if(pending){const p=pending;pending=undefined;return p;}if(queued){const p=queued;queued=undefined;return p;}return generate(s);},
+      phrase:p=>{
+        if(!active.current||token!==session.current)return;
+        if(current.current&&recordCurrent){history.current.push(current.current.phrase);if(history.current.length>50)history.current.shift();setCanGoPrevious(history.current.length>0);}
+        if(!first)recordCurrent=true;
+        current.current={phrase:p,settings:s};setPhrase(p);setElapsed(0);setPhase('question');
+        if(!first||!isRepeat)setCount(n=>n+1);first=false;
+      },
+      progress:seconds=>{
+        if(token!==session.current||!current.current)return;
+        setElapsed(seconds);setPhase(s.infiniteMelody||seconds<current.current.phrase.beats*60/s.bpm?'question':'answer');
+      },
+      error:e=>{if(token===session.current)fail(e);}
     });
-    queueTimer.current=setTimeout(()=>{queueTimer.current=null;if(!active.current||token!==session.current||next.current)return;try{next.current=makeBundle(bundle.settings);}catch(e){fail(e);}},100);
   }
   function fail(e:unknown){stop();setError(e instanceof Error?e.message:'Не удалось запустить звук. Попробуй ещё раз.');}
   async function start(){
     if(active.current||problem)return;active.current=true;const token=++session.current;setError('');setPhase('loading');setShowSettings(false);
-    try{await audio.initialize();if(token!==session.current||!active.current)return;if(settings.drone)stopDrone.current=audio.startDrone(settings);history.current=[];setCanGoPrevious(false);setCount(0);playBundle(makeBundle(settings),token);}catch(e){fail(e);}
+    try{await audio.initialize();if(token!==session.current||!active.current)return;if(settings.drone)stopDrone.current=audio.startDrone(settings);history.current=[];setCanGoPrevious(false);setCount(0);playSequence(settings,token);}catch(e){if(token===session.current)fail(e);}
   }
   async function repeat(){
     if(!phrase||phase==='loading')return;
     const p=phrase,s=current.current?.settings??settings;active.current=false;session.current++;clearPlayback(false);active.current=true;const token=++session.current;setPhase('loading');setError('');
-    try{await audio.initialize();if(token!==session.current||!active.current)return;if(s.drone&&!stopDrone.current)stopDrone.current=audio.startDrone(s);playBundle(makeBundle(s,p),token,true,false);}catch(e){fail(e);}
+    try{await audio.initialize();if(token!==session.current||!active.current)return;if(s.drone&&!stopDrone.current)stopDrone.current=audio.startDrone(s);playSequence(s,token,p,true,false);}catch(e){if(token===session.current)fail(e);}
   }
   async function goPrevious(){
     if(!active.current||!current.current||!history.current.length||phase==='loading')return;
     const s=current.current.settings,currentPhrase=current.current.phrase,previousPhrase=history.current.pop()!;
     setCanGoPrevious(history.current.length>0);active.current=false;session.current++;clearPlayback(false);active.current=true;const token=++session.current;setPhase('loading');setError('');
-    try{await audio.initialize();if(token!==session.current||!active.current)return;next.current=makeBundle(s,currentPhrase);playBundle(makeBundle(s,previousPhrase),token,true,true);}catch(e){fail(e);}
+    try{await audio.initialize();if(token!==session.current||!active.current)return;playSequence(s,token,previousPhrase,true,true,currentPhrase);}catch(e){if(token===session.current)fail(e);}
   }
   const questionBeats=phrase?.beats??settings.bars*4;
   const secondsPerBeat=60/settings.bpm,questionSeconds=questionBeats*secondsPerBeat,totalSeconds=(questionBeats+(settings.infiniteMelody?0:settings.answerBars*4))*secondsPerBeat;

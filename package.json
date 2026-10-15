@@ -1,9 +1,29 @@
 {
   "name": "question-and-answer",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "main": "index.ts",
-  "scripts": {"start": "expo start --lan", "web": "expo start --web", "typecheck": "tsc --noEmit", "test": "node scripts/test.cjs", "export:web": "expo export --platform web && node scripts/build-standalone.cjs", "export:android": "expo export --platform android --output-dir android-dist"},
-  "dependencies": {"expo": "~57.0.27", "expo-audio": "~57.0.5", "expo-file-system": "~57.0.7", "expo-status-bar": "~57.0.1", "react": "19.2.3", "react-dom": "19.2.3", "react-native": "0.86.3", "react-native-web": "~0.21.0"},
-  "devDependencies": {"typescript": "~6.0.3", "@types/react": "~19.2.2", "@types/node": "^26.6.3"}
+  "scripts": {
+    "start": "expo start --lan",
+    "web": "expo start --web",
+    "typecheck": "tsc --noEmit",
+    "test": "node scripts/test.cjs",
+    "export:web": "expo export --platform web && node scripts/build-standalone.cjs",
+    "export:android": "expo export --platform android --output-dir android-dist"
+  },
+  "dependencies": {
+    "expo": "~57.0.27",
+    "expo-audio": "~57.0.5",
+    "expo-file-system": "~57.0.7",
+    "expo-status-bar": "~57.0.1",
+    "react": "19.2.3",
+    "react-dom": "19.2.3",
+    "react-native": "0.86.3",
+    "react-native-web": "~0.21.0"
+  },
+  "devDependencies": {
+    "typescript": "~6.0.3",
+    "@types/react": "~19.2.2",
+    "@types/node": "^26.6.3"
+  }
 }

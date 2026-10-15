@@ -105,15 +105,20 @@ function synth2Tone(midi:number,length:number,keyOff:number):Float32Array {
   }
   return out;
 }
-export function render(phrase: Phrase,s: Settings): Float32Array {
-  const spb=60/s.bpm, totalBeats=phrase.beats+(s.infiniteMelody?0:s.answerBars*4), out=new Float32Array(Math.ceil(totalBeats*spb*SAMPLE_RATE));
+export function render(phrase: Phrase,s: Settings,beatOffset=0): Float32Array {
+  const spb=60/s.bpm, totalBeats=phrase.beats+(s.infiniteMelody?0:s.answerBars*4);
+  const samplesPerBeat=spb*SAMPLE_RATE;
+  const sampleAt=(beat:number)=>Math.round((beatOffset+beat)*samplesPerBeat)-Math.round(beatOffset*samplesPerBeat);
+  // Piano recordings last at most five seconds. Preserve their complete decay.
+  const tail=s.infiniteMelody?5*SAMPLE_RATE:0;
+  const out=new Float32Array(sampleAt(totalBeats)+tail);
   for(const event of phrase.events) {
     if(!event.note) continue;
     const midi=event.note.midi;
-    const start=Math.round(event.beat*spb*SAMPLE_RATE);
+    const start=sampleAt(event.beat);
     const length=Math.floor(event.duration*spb*SAMPLE_RATE*.92);
     if(s.instrument==='acousticGuitar'){
-      const voice=pluck(midi,length,Math.round(midi*997+event.beat*1009));
+      const voice=pluck(midi,length,Math.round(midi*997+(beatOffset+event.beat)*1009));
       for(let i=0;i<length;i++)out[start+i]+=voice[i]*Math.min(1,i/50,(length-i)/350)*s.volume*.85;
       continue;
     }
@@ -145,7 +150,7 @@ export function render(phrase: Phrase,s: Settings): Float32Array {
   }
   for(let beat=0;beat<totalBeats;beat++) {
     if(!s.metro||(beat>=phrase.beats&&!s.metroDuringAnswer)) continue;
-    const start=Math.round(beat*spb*SAMPLE_RATE), hz=beat%4===0?1500:1000;
+    const start=sampleAt(beat), hz=beat%4===0?1500:1000;
     for(let i=0;i<600&&start+i<out.length;i++) out[start+i]+=Math.sin(2*Math.PI*hz*i/SAMPLE_RATE)*Math.exp(-i/100)*.2*s.volume;
   }
   return out;

@@ -70,3 +70,23 @@ assert.ok(Math.abs(dDrone[0]-dDrone.at(-1))<=maxStep*1.1,'loop boundary has no c
 for(let droneTone=0;droneTone<3;droneTone++){const candidate=renderDrone({...dSettings,droneTone});assert.ok(candidate.every(Number.isFinite),`drone tone ${droneTone} stays finite`);assert.ok(Math.max(...candidate.slice(0,1000).map(Math.abs))>0.05,`drone tone ${droneTone} is audible`);}
 assert.equal(DEFAULTS.metro,true,'metronome is enabled by default');assert.equal(DEFAULTS.metroDuringAnswer,true,'metronome remains enabled during the answer by default');
 console.log('Opening notes are evenly drawn from the chosen pool. Metronome can be silenced during the answer; drone loops without a click.');
+const {createSequenceRenderer}=require('../src/sequence.ts');
+const sequenceSettings={...DEFAULTS,infiniteMelody:true,bpm:137,metro:true,metroDuringAnswer:false};
+const sequenceNote=pool(sequenceSettings)[0];
+const sequencePhrases=Array.from({length:8},(_,index)=>({beats:4,events:index%3===0?[{beat:3.5,duration:.5,note:sequenceNote}]:[]}));
+const wholePhrase={beats:32,events:sequencePhrases.flatMap((phrase,index)=>phrase.events.map(event=>({...event,beat:index*4+event.beat})))};
+for(const instrument of ['piano','bass','acousticGuitar','synth1','synth2']){
+ const settings={...sequenceSettings,instrument};let index=0;
+ const nextChunk=createSequenceRenderer(settings,()=>sequencePhrases[index++]);
+ const chunks=sequencePhrases.map(()=>nextChunk().pcm);
+ const whole=render(wholePhrase,settings);let offset=0,maxDifference=0;
+ for(const chunk of chunks){for(let i=0;i<chunk.length;i++)maxDifference=Math.max(maxDifference,Math.abs(chunk[i]-whole[offset+i]));offset+=chunk.length;}
+ assert.equal(offset,Math.round(32*60/settings.bpm*SAMPLE_RATE),'phrase boundaries retain the exact cumulative musical duration');
+ assert.ok(maxDifference<1e-6,`${instrument}: streaming and one continuous render must match, difference ${maxDifference}`);
+}
+const silentSettings={...sequenceSettings,instrument:'piano',metro:false,bpm:180};let silentIndex=0;
+const decayStream=createSequenceRenderer(silentSettings,()=>silentIndex++===0?{beats:4,events:[{beat:3.5,duration:.5,note:sequenceNote}]}:{beats:4,events:[]});
+decayStream();const continuedDecay=decayStream().pcm;
+assert.ok(continuedDecay.some(value=>Math.abs(value)>.001),'piano decay continues into a following phrase with no notes');
+console.log('All five voices match a continuous render across eight chunks; piano tails survive phrase boundaries.');
+require('./test-playback.cjs');
