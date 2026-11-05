@@ -89,7 +89,7 @@ const decayStream=createSequenceRenderer(silentSettings,()=>silentIndex++===0?{b
 decayStream();const continuedDecay=decayStream().pcm;
 assert.ok(continuedDecay.some(value=>Math.abs(value)>.001),'piano decay continues into a following phrase with no notes');
 console.log('All five voices match a continuous render across eight chunks; piano tails survive phrase boundaries.');
-const denseSettings={...sequenceSettings,instrument:'piano',bpm:180,volume:1,drone:true};
+const denseSettings={...sequenceSettings,instrument:'piano',bpm:180,volume:1,drone:true,reverb:100};
 const densePhrases=Array.from({length:12},()=>({beats:4,events:Array.from({length:12},(_,i)=>({beat:i/4,duration:.25,note:sequenceNote}))}));
 const denseWhole={beats:48,events:densePhrases.flatMap((phrase,index)=>phrase.events.map(event=>({...event,beat:index*4+event.beat})))};
 const denseReference=createSequenceRenderer(denseSettings,()=>denseWhole)().pcm;
@@ -152,3 +152,4 @@ for(const instrument of ['piano','bass','acousticGuitar','synth1','synth2'])for(
 console.log('Question playback counts 1–8 validated in both modes: same phrase, continuous tails, final answer pause, metronome and legacy settings.');
 require('./test-playback.cjs');
 require('./test-updates.cjs');
+require('./test-reverb.cjs');

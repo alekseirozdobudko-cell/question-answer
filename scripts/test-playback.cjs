@@ -101,8 +101,9 @@ async function test(){
  assert.equal(files.size,0,'a failed synchronous write removes its incomplete audio file');
  failWrites=false;
  const storage=loadAudio('storage.ts',nativeMocks,{});
- storage.writeSettings({bpm:80});storage.writeSettings({bpm:120});
+ storage.writeSettings({bpm:80,reverb:15});storage.writeSettings({bpm:120,reverb:0});
  assert.equal(storage.readSettings().bpm,120,'settings writes complete in order before the next read');
+ assert.equal(storage.readSettings().reverb,0,'a disabled reverb setting survives saving and loading');
  files.clear();
  const native=loadAudio('audio.android.ts',nativeMocks,{setTimeout:(fn,ms)=>ms===10000?(startup=fn,2):(pending=fn,1),clearTimeout:id=>{if(id===2)startup=undefined;else if(id===1)pending=undefined;}});
  seen=[];errors=[];

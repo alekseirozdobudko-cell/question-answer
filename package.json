@@ -1,6 +1,6 @@
 {
   "name": "question-and-answer",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "private": true,
   "main": "index.ts",
   "scripts": {
@@ -12,6 +12,7 @@
     "export:android": "expo export --platform android --output-dir android-dist"
   },
   "dependencies": {
+    "@react-native-community/slider": "5.2.1",
     "expo": "~58.0.23",
     "expo-audio": "~58.0.11",
     "expo-file-system": "~58.0.13",

@@ -7,6 +7,12 @@ const match=html.match(/<script src="([^"]+)" defer><\/script>/);
 if(!match)throw new Error('Expo web bundle script was not found. Run npm run export:web first.');
 const bundlePath=path.resolve(project,'dist',match[1].replace(/^\//,''));
 const bundle=fs.readFileSync(bundlePath,'utf8').replace(/<\/script/gi,'<\\/script');
-const standalone=html.replace('lang="en"','lang="ru"').replace(match[0],()=>'<script>'+bundle+'</script>');
+const standalone=html
+  .replace('lang="en"','lang="ru"')
+  .replace(match[0],()=>'<script>'+bundle+'</script>')
+  .replace('href="/favicon.ico"',()=>{
+    const icon=fs.readFileSync(path.join(project,'dist','favicon.ico')).toString('base64');
+    return 'href="data:image/x-icon;base64,'+icon+'"';
+  });
 fs.mkdirSync(path.dirname(output),{recursive:true});fs.writeFileSync(output,standalone);
 console.log('Standalone app written to '+output);

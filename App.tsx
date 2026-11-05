@@ -2,7 +2,8 @@ import React, {useEffect,useRef,useState} from 'react';
 import {AppState,View,Text,Pressable,ScrollView,StyleSheet,Switch,Modal,useWindowDimensions,Platform,Linking} from 'react-native';
 import {StatusBar} from 'expo-status-bar';
 import {useKeepAwake} from 'expo-keep-awake';
-import {CHORDS,SCALES,ROOTS,LEVELS,DEFAULTS,formula,pool,rangeError,generate,preset,tetrachordFormula,questionPlayCount,type Settings,type Phrase} from './src/music';
+import Slider from '@react-native-community/slider';
+import {CHORDS,SCALES,ROOTS,LEVELS,DEFAULTS,formula,pool,rangeError,generate,preset,tetrachordFormula,questionPlayCount,reverbAmount,type Settings,type Phrase} from './src/music';
 import * as audio from './src/audio';
 import {readSettings,writeSettings} from './src/storage';
 import {CURRENT_VERSION,RELEASES_URL,latestRelease,type AppRelease} from './src/updates';
@@ -102,6 +103,7 @@ export default function App(){
   }
   const questionBeats=phrase?.beats??settings.bars*4;
   const plays=questionPlayCount(settings);
+  const reverb=reverbAmount(settings);
   const secondsPerBeat=60/settings.bpm,questionSeconds=questionBeats*secondsPerBeat;
   const listeningSeconds=questionSeconds*plays,totalSeconds=listeningSeconds+(settings.infiniteMelody?0:settings.answerBars*4*secondsPerBeat);
   const answer=phase==='answer',phaseTime=answer?elapsed-listeningSeconds:elapsed%questionSeconds;
@@ -161,6 +163,9 @@ export default function App(){
       <Text style={[styles.small,{marginTop:8}]}>Выбери тембр тоники. Дрон звучит без пауз, пока идёт упражнение.</Text>
       <View style={styles.wrap}>{[.25,.5,.75,1].map(volume=><Chip key={volume} label={`${volume*100}%`} selected={settings.volume===volume} onPress={()=>update({volume})} disabled={running}/>)}</View>
       <Text style={[styles.small,{marginTop:9}]}>Громкость инструмента и метронома</Text>
+      <Stepper label="Реверберация" value={reverb} min={0} max={100} suffix="%" onChange={reverb=>update({reverb})} disabled={running}/>
+      <Slider accessibilityLabel="Количество реверберации" accessibilityValue={{min:0,max:100,now:reverb,text:`${reverb}%`}} aria-valuemin={0} aria-valuemax={100} aria-valuenow={reverb} aria-valuetext={`${reverb}%`} aria-disabled={running} minimumValue={0} maximumValue={100} step={1} value={reverb} onValueChange={reverb=>update({reverb})} disabled={running} minimumTrackTintColor={C.deep} maximumTrackTintColor={C.line} thumbTintColor={C.deep} style={{height:44}}/>
+      <Text style={styles.small}>Room · небольшая комната. При 0% звучит исходный инструмент.</Text>
     </>)}
     <Pressable accessibilityRole="button" disabled={running} onPress={()=>setSettings({...DEFAULTS})}><Text style={styles.reset}>Сбросить настройки</Text></Pressable>
   </>;

@@ -154,12 +154,19 @@ export function render(phrase: Phrase,s: Settings,beatOffset=0): Float32Array {
       out[start+i]+=(source.pcm[k]*(1-frac)+source.pcm[k+1]*frac)*gain;
     }
   }
+  mixMetronome(out,phrase,s,beatOffset);
+  return out;
+}
+export function mixMetronome(out:Float32Array,phrase:Phrase,s:Settings,beatOffset=0){
+  if(!s.metro)return;
+  const totalBeats=phrase.beats+(s.infiniteMelody?0:s.answerBars*4);
+  const samplesPerBeat=60/s.bpm*SAMPLE_RATE;
+  const sampleAt=(beat:number)=>Math.round((beatOffset+beat)*samplesPerBeat)-Math.round(beatOffset*samplesPerBeat);
   for(let beat=0;beat<totalBeats;beat++) {
-    if(!s.metro||(beat>=phrase.beats&&!s.metroDuringAnswer)) continue;
+    if(beat>=phrase.beats&&!s.metroDuringAnswer) continue;
     const start=sampleAt(beat), hz=beat%4===0?1500:1000;
     for(let i=0;i<600&&start+i<out.length;i++) out[start+i]+=Math.sin(2*Math.PI*hz*i/SAMPLE_RATE)*Math.exp(-i/100)*.2*s.volume;
   }
-  return out;
 }
 export function renderDrone(s: Settings): Float32Array {
   const seconds=4,length=seconds*SAMPLE_RATE;
