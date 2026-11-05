@@ -5,9 +5,11 @@ import {useKeepAwake} from 'expo-keep-awake';
 import {CHORDS,SCALES,ROOTS,LEVELS,DEFAULTS,formula,pool,rangeError,generate,preset,tetrachordFormula,questionPlayCount,type Settings,type Phrase} from './src/music';
 import * as audio from './src/audio';
 import {readSettings,writeSettings} from './src/storage';
+import {CURRENT_VERSION,RELEASES_URL,latestRelease,type AppRelease} from './src/updates';
 
 const C={bg:'#F5F4EE',ink:'#232B27',muted:'#778078',line:'#E0E3D9',green:'#D7F27A',deep:'#224F42',paper:'#FFFFFF',amber:'#E9B967'};
 type Bundle={phrase:Phrase;settings:Settings};
+type UpdateState={status:'idle'|'checking'}|{status:'ready';release:AppRelease|null}|{status:'error';message:string};
 function PracticeScreenAwake(){
   useKeepAwake(undefined,{suppressDeactivateWarnings:true});
   return null;
@@ -24,6 +26,8 @@ export default function App(){
   const [phrase,setPhrase]=useState<Phrase|null>(null),[phase,setPhase]=useState<'idle'|'loading'|'question'|'answer'>('idle');
   const [elapsed,setElapsed]=useState(0),[count,setCount]=useState(0),[showSettings,setShowSettings]=useState(false),[error,setError]=useState(''),[canGoPrevious,setCanGoPrevious]=useState(false);
   const [picker,setPicker]=useState<'chord'|'scale'|null>(null),[credits,setCredits]=useState(false);
+  const [updatesOpen,setUpdatesOpen]=useState(false),[updates,setUpdates]=useState<UpdateState>({status:'idle'});
+  const updateRequest=useRef<AbortController|null>(null);
   const active=useRef(false),session=useRef(0),stopSound=useRef<(()=>void)|null>(null),stopDrone=useRef<(()=>void)|null>(null),current=useRef<Bundle|null>(null),history=useRef<Phrase[]>([]);
   const running=phase!=='idle';const problem=rangeError(settings), available=pool(settings), form=formula(settings);
   const update=(patch:Partial<Settings>)=>{if(!active.current)setSettings(s=>({...s,...patch}));};
@@ -39,8 +43,29 @@ export default function App(){
     const sub=AppState.addEventListener('change',state=>{if(state!=='active')stop();});
     const hidden=()=>{if(document.hidden)stop();};
     if(Platform.OS==='web')document.addEventListener('visibilitychange',hidden);
-    return ()=>{active.current=false;session.current++;clearPlayback();sub.remove();if(Platform.OS==='web')document.removeEventListener('visibilitychange',hidden);};
+    return ()=>{active.current=false;session.current++;clearPlayback();sub.remove();updateRequest.current?.abort();updateRequest.current=null;if(Platform.OS==='web')document.removeEventListener('visibilitychange',hidden);};
   },[]);
+  async function checkUpdates(){
+    updateRequest.current?.abort();
+    const request=new AbortController();updateRequest.current=request;
+    setUpdates({status:'checking'});
+    const timeout=setTimeout(()=>request.abort(),10000);
+    try{
+      const release=await latestRelease(request.signal);
+      if(updateRequest.current===request)setUpdates({status:'ready',release});
+    }catch(e){
+      if(updateRequest.current===request)setUpdates({status:'error',message:request.signal.aborted?'Проверка заняла слишком много времени. Попробуй ещё раз.':e instanceof Error?e.message:'Не удалось проверить обновления. Проверь подключение к интернету.'});
+    }finally{
+      clearTimeout(timeout);if(updateRequest.current===request)updateRequest.current=null;
+    }
+  }
+  function closeUpdates(){
+    updateRequest.current?.abort();updateRequest.current=null;setUpdatesOpen(false);
+  }
+  async function openUpdateLink(url:string){
+    try{await Linking.openURL(url);}
+    catch{setUpdates({status:'error',message:'Не удалось открыть ссылку. Попробуй ещё раз или открой страницу релизов.'});}
+  }
   function playSequence(s:Settings,token:number,initial?:Phrase,isRepeat=false,recordHistory=true,following?:Phrase){
     let pending=initial,queued=following,first=true,recordCurrent=recordHistory;
     stopSound.current=audio.playSequence(s,{
@@ -84,6 +109,8 @@ export default function App(){
   const currentPlay=Math.min(plays,Math.floor(elapsed/questionSeconds)+1);
   const beatIndex=Math.floor(phaseTime/secondsPerBeat)%4;
   const currentEvent=phase==='question'?phrase?.events.findIndex(e=>phaseTime/secondsPerBeat>=e.beat&&phaseTime/secondsPerBeat<e.beat+e.duration):-1;
+  const availableUpdate=updates.status==='ready'&&updates.release?.isNewer?updates.release:null;
+  const updateDownload=Platform.OS==='android'?availableUpdate?.apkUrl:Platform.OS==='web'?availableUpdate?.htmlUrl:null;
   const group=(label:string,children:React.ReactNode)=><View style={styles.settingGroup}><Text style={styles.groupLabel}>{label}</Text>{children}</View>;
   const settingsContent=<>
     <View style={styles.panelHeading}><Text style={styles.panelTitle}>Твоя практика</Text><Text style={styles.small}>4/4</Text></View>
@@ -165,9 +192,27 @@ export default function App(){
       </View>
       {wide&&<View style={styles.settingsPanel}>{settingsContent}</View>}
     </View>
-    <View style={styles.footer}><Text style={styles.footerText}>Q:A · СЛУХ РАЗВИВАЕТСЯ В ДИАЛОГЕ</Text><Pressable accessibilityRole="button" onPress={()=>setCredits(true)}><Text style={styles.footerLink}>О звуке и приложении ↗</Text></Pressable></View>
+    <View style={styles.footer}><Text style={styles.footerText}>Q:A · СЛУХ РАЗВИВАЕТСЯ В ДИАЛОГЕ</Text><Pressable accessibilityRole="button" onPress={()=>{setUpdatesOpen(true);checkUpdates();}}><Text style={styles.footerLink}>Обновления ↗</Text></Pressable><Pressable accessibilityRole="button" onPress={()=>setCredits(true)}><Text style={styles.footerLink}>О звуке и приложении ↗</Text></Pressable></View>
   </ScrollView>
   <Modal visible={showSettings&&!wide} animationType="slide" onRequestClose={()=>setShowSettings(false)}><View style={styles.modalPage}><View style={styles.modalHeader}><Text style={styles.panelTitle}>Настройки</Text><Pressable accessibilityRole="button" onPress={()=>setShowSettings(false)}><Text style={styles.close}>Готово</Text></Pressable></View><ScrollView contentContainerStyle={{padding:22,paddingBottom:50}}>{settingsContent}</ScrollView></View></Modal>
+  <Modal visible={updatesOpen} transparent animationType="fade" onRequestClose={closeUpdates}>
+    <View style={styles.overlay}><View style={styles.dialog}>
+      <View style={styles.modalHeader}><Text style={styles.panelTitle}>Обновления</Text><Pressable accessibilityRole="button" onPress={closeUpdates}><Text style={styles.close}>Закрыть</Text></Pressable></View>
+      <ScrollView contentContainerStyle={{paddingHorizontal:22,paddingBottom:22}}>
+        <Text style={styles.about}>Установленная версия {CURRENT_VERSION}</Text>
+        {updates.status==='checking'&&<Text accessibilityLiveRegion="polite" style={styles.small}>Проверяем обновления…</Text>}
+        {updates.status==='error'&&<Text accessibilityRole="alert" style={styles.error}>{updates.message}</Text>}
+        {updates.status==='ready'&&<Text accessibilityLiveRegion="polite" style={styles.about}>{availableUpdate?`Доступна версия ${availableUpdate.version}.`:updates.release?'Новых версий пока нет.':'Пока нет опубликованной версии.'}</Text>}
+        {availableUpdate&&updateDownload&&<>
+          <Pressable accessibilityRole="button" onPress={()=>openUpdateLink(updateDownload)} style={styles.select}><Text style={styles.selectText}>{Platform.OS==='android'?'Скачать APK':'Скачать HTML'} {availableUpdate.version} ↗</Text></Pressable>
+          {Platform.OS==='android'&&<Text style={[styles.small,{marginTop:10}]}>После загрузки открой APK и подтверди установку обновления.</Text>}
+        </>}
+        {availableUpdate&&!updateDownload&&<Text style={styles.small}>{Platform.OS==='android'?'APK пока недоступен. Открой страницу релиза.':'Открой страницу релиза, чтобы посмотреть доступные файлы.'}</Text>}
+        <Pressable accessibilityRole="button" accessibilityState={{disabled:updates.status==='checking',busy:updates.status==='checking'}} disabled={updates.status==='checking'} onPress={checkUpdates} style={[styles.select,updates.status==='checking'&&{opacity:.5}]}><Text style={styles.selectText}>{updates.status==='checking'?'Проверяем…':'Проверить ещё раз'}</Text></Pressable>
+        <Pressable accessibilityRole="button" onPress={()=>openUpdateLink(availableUpdate?.releaseUrl??RELEASES_URL)} style={styles.select}><Text style={styles.selectText}>Открыть релизы на GitHub ↗</Text></Pressable>
+      </ScrollView>
+    </View></View>
+  </Modal>
   <Modal visible={!!picker} transparent animationType="fade" onRequestClose={()=>setPicker(null)}><View style={styles.overlay}><View style={styles.dialog}><View style={styles.modalHeader}><Text style={styles.panelTitle}>{picker==='chord'?'Выбери аккорд':'Выбери лад'}</Text><Pressable accessibilityRole="button" onPress={()=>setPicker(null)}><Text style={styles.close}>Закрыть</Text></Pressable></View><ScrollView>{(picker==='chord'?CHORDS:SCALES).map((f,i)=><Pressable accessibilityRole="button" key={f.name} style={styles.option} onPress={()=>{update(picker==='chord'?{chord:i}:{scale:i,tetrachord:settings.tetrachord%SCALES[i].degrees.length});setPicker(null);}}><Text style={styles.optionTitle}>{f.name}</Text><Text style={styles.small}>{f.degrees.join(' · ')}</Text></Pressable>)}</ScrollView></View></View></Modal>
   <Modal visible={credits} transparent animationType="fade" onRequestClose={()=>setCredits(false)}><View style={styles.overlay}><View style={[styles.dialog,{padding:26}]}><Text style={styles.panelTitle}>Question and Answer</Text><Text style={styles.about}>Самостоятельная тренировка музыкального слуха. Приложение не записывает звук и не оценивает твою игру — сравнивай её с фразой на экране.</Text><Text style={styles.about}>Акустическая гитара использует синтезированную модель щипка, созданную в приложении.</Text><Text style={styles.about}>Синтезатор 1 использует аддитивный звук с обертонами. Синтезатор 2 моделирует удар молоточка, несколько струн и их затухание.</Text><Text style={styles.about}>Пианино использует записанные сэмплы Meta Open Sound: все 88 клавиш, средний слой динамики. CC0 1.0.</Text><Pressable onPress={()=>Linking.openURL('https://github.com/facebookincubator/Meta-open-sound')}><Text style={styles.close}>Источник сэмплов пианино · Meta Open Sound ↗</Text></Pressable><Text style={styles.about}>Пианино использует записанные сэмплы Meta Open Sound: все 88 клавиш, средний слой динамики. CC0 1.0.</Text><Pressable onPress={()=>Linking.openURL('https://github.com/facebookincubator/Meta-open-sound')}><Text style={styles.close}>Источник сэмплов пианино · Meta Open Sound ↗</Text></Pressable><Text style={styles.about}>Настоящие сэмплы электрического баса: Karoryfer, коллекция tonejs-instruments / Nicholaus P. Brosowsky. CC BY 3.0. Сэмплы преобразованы в моно PCM 22 050 Гц, укорочены и транспонируются при воспроизведении.</Text><Pressable onPress={()=>Linking.openURL('https://github.com/nbrosowsky/tonejs-instruments')}><Text style={styles.close}>Источник басовых сэмплов ↗</Text></Pressable><Pressable onPress={()=>Linking.openURL('https://creativecommons.org/licenses/by/3.0/')}><Text style={[styles.close,{marginTop:12}]}>Лицензия CC BY 3.0 ↗</Text></Pressable><Text style={styles.about}>Держи приложение открытым: при сворачивании практика останавливается. Расширенные аккорды показаны в тесном расположении; 9, 11, 13 обозначают функции нот.</Text><Pressable accessibilityRole="button" onPress={()=>setCredits(false)} style={styles.select}><Text style={styles.selectText}>Понятно</Text></Pressable></View></View></Modal>
   </View>;

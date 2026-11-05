@@ -151,3 +151,4 @@ for(const instrument of ['piano','bass','acousticGuitar','synth1','synth2'])for(
 }
 console.log('Question playback counts 1–8 validated in both modes: same phrase, continuous tails, final answer pause, metronome and legacy settings.');
 require('./test-playback.cjs');
+require('./test-updates.cjs');
