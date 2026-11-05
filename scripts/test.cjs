@@ -2,7 +2,7 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const ts=require('typescript');
 require.extensions['.ts']=(module,filename)=>module._compile(ts.transpile(fs.readFileSync(filename,'utf8'),{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,resolveJsonModule:true}),filename);
-const {DEFAULTS,CHORDS,SCALES,LEVELS,pool,generate,rangeError,preset,tetrachordFormula}=require('../src/music.ts');
+const {DEFAULTS,CHORDS,SCALES,LEVELS,pool,generate,rangeError,preset,tetrachordFormula,questionPlayCount}=require('../src/music.ts');
 const {render,renderDrone,SAMPLE_RATE}=require('../src/render.ts');
 let seed=728;const random=()=>{seed=(seed*1664525+1013904223)>>>0;return seed/4294967296;};
 assert.equal(pool(DEFAULTS).length,3);assert.equal(pool({...DEFAULTS,octaves:2}).length,6);assert.equal(pool({...DEFAULTS,octaves:3}).length,9);
@@ -79,7 +79,7 @@ for(const instrument of ['piano','bass','acousticGuitar','synth1','synth2']){
  const settings={...sequenceSettings,instrument};let index=0;
  const nextChunk=createSequenceRenderer(settings,()=>sequencePhrases[index++]);
  const chunks=sequencePhrases.map(()=>nextChunk().pcm);
- const whole=render(wholePhrase,settings);let offset=0,maxDifference=0;
+ const whole=createSequenceRenderer(settings,()=>wholePhrase)().pcm;let offset=0,maxDifference=0;
  for(const chunk of chunks){for(let i=0;i<chunk.length;i++)maxDifference=Math.max(maxDifference,Math.abs(chunk[i]-whole[offset+i]));offset+=chunk.length;}
  assert.equal(offset,Math.round(32*60/settings.bpm*SAMPLE_RATE),'phrase boundaries retain the exact cumulative musical duration');
  assert.ok(maxDifference<1e-6,`${instrument}: streaming and one continuous render must match, difference ${maxDifference}`);
@@ -89,4 +89,65 @@ const decayStream=createSequenceRenderer(silentSettings,()=>silentIndex++===0?{b
 decayStream();const continuedDecay=decayStream().pcm;
 assert.ok(continuedDecay.some(value=>Math.abs(value)>.001),'piano decay continues into a following phrase with no notes');
 console.log('All five voices match a continuous render across eight chunks; piano tails survive phrase boundaries.');
+const denseSettings={...sequenceSettings,instrument:'piano',bpm:180,volume:1,drone:true};
+const densePhrases=Array.from({length:12},()=>({beats:4,events:Array.from({length:12},(_,i)=>({beat:i/4,duration:.25,note:sequenceNote}))}));
+const denseWhole={beats:48,events:densePhrases.flatMap((phrase,index)=>phrase.events.map(event=>({...event,beat:index*4+event.beat})))};
+const denseReference=createSequenceRenderer(denseSettings,()=>denseWhole)().pcm;
+let denseIndex=0,denseOffset=0,limited=false;
+const denseStream=createSequenceRenderer(denseSettings,()=>densePhrases[denseIndex++]);
+const rawDense=render(denseWhole,denseSettings);
+let dronePeak=0;
+for(const value of renderDrone(denseSettings))dronePeak=Math.max(dronePeak,Math.abs(value));
+for(let block=0;block<densePhrases.length;block++){
+ const {pcm}=denseStream();
+ for(let i=0;i<pcm.length;i++){
+  assert.ok(Math.abs(pcm[i])<=.750001,'dense piano overlap leaves headroom for the drone');
+  assert.ok(Math.abs(pcm[i]-denseReference[denseOffset+i])<1e-6,'limiter gain remains continuous across phrase boundaries');
+  if(Math.abs(rawDense[denseOffset+i])>.76)limited=true;
+ }
+ denseOffset+=pcm.length;
+}
+assert.ok(limited,'regression exercises overlapping piano peaks above the output ceiling');
+assert.ok(.750001+dronePeak<1,'the melody and tonic drone fit within the output range together');
+console.log('Dense piano playback stays below the output ceiling, including note tails and the tonic drone.');
+assert.equal(DEFAULTS.questionPlays,1,'existing practice starts with one question playback');
+for(const invalid of [undefined,null,0,-1,1.5,9,Infinity,NaN,'3']){
+ assert.equal(questionPlayCount({...DEFAULTS,questionPlays:invalid}),1,'missing or invalid saved playback counts fall back to one');
+}
+for(let plays=1;plays<=8;plays++)for(const infiniteMelody of [false,true]){
+ const settings={...DEFAULTS,questionPlays:plays,infiniteMelody,bpm:137,answerBars:2,metro:true,metroDuringAnswer:false};
+ assert.equal(questionPlayCount(settings),plays);
+ const next=createSequenceRenderer(settings,()=>({beats:4,events:[]}));
+ const listeningBeats=4*plays,cycleBeats=listeningBeats+(infiniteMelody?0:8);
+ let offset=0;
+ for(let cycle=0;cycle<2;cycle++){
+  const {pcm}=next();offset+=pcm.length;
+  assert.equal(offset,Math.round((cycle+1)*cycleBeats*60/settings.bpm*SAMPLE_RATE),'all repetitions and exactly one answer pause retain musical timing');
+  const sampleAt=beat=>Math.round((cycle*cycleBeats+beat)*60/settings.bpm*SAMPLE_RATE)-Math.round(cycle*cycleBeats*60/settings.bpm*SAMPLE_RATE);
+  for(let beat=0;beat<listeningBeats;beat++){
+   let peak=0;const start=sampleAt(beat);
+   for(let i=0;i<600&&start+i<pcm.length;i++)peak=Math.max(peak,Math.abs(pcm[start+i]));
+   assert.ok(peak>.01,'metronome remains active throughout every question repetition');
+  }
+  if(!infiniteMelody)assert.ok(pcm.subarray(sampleAt(listeningBeats)).every(value=>value===0),'the silent answer starts only after the final repetition');
+ }
+}
+const repeatedPhrase={beats:4,events:[{beat:0,duration:1,note:sequenceNote},{beat:1,duration:2.5,note:null},{beat:3.5,duration:.5,note:sequenceNote}]};
+const repeatedReference={beats:12,events:[0,4,8].flatMap(offset=>repeatedPhrase.events.map(event=>({...event,beat:event.beat+offset})))};
+for(const instrument of ['piano','bass','acousticGuitar','synth1','synth2'])for(const infiniteMelody of [false,true]){
+ const settings={...DEFAULTS,instrument,questionPlays:3,infiniteMelody,bpm:137,answerBars:1,metro:true,metroDuringAnswer:false};
+ let generated=0;
+ const stream=createSequenceRenderer(settings,()=>{generated++;return repeatedPhrase;});
+ const actual=stream();
+ assert.equal(generated,1,'repetitions reuse the same generated phrase');
+ assert.equal(actual.phrase,repeatedPhrase,'history and note display retain the original phrase');
+ assert.equal(actual.phrase.events.length,3,'repeated audio never changes the displayed notes');
+ const reference=createSequenceRenderer({...settings,questionPlays:1},()=>repeatedReference)().pcm;
+ assert.equal(actual.pcm.length,reference.length);
+ let difference=0;
+ for(let i=0;i<reference.length;i++)difference=Math.max(difference,Math.abs(actual.pcm[i]-reference[i]));
+ assert.ok(difference<1e-6,`${instrument}: repeated question audio matches a continuous performance, including decays`);
+ stream();assert.equal(generated,2,'a fresh question is requested after each complete set of repetitions');
+}
+console.log('Question playback counts 1–8 validated in both modes: same phrase, continuous tails, final answer pause, metronome and legacy settings.');
 require('./test-playback.cjs');

@@ -5,7 +5,9 @@ import type {Settings} from './music';
 export async function initialize(){await setAudioModeAsync({playsInSilentMode:true,shouldPlayInBackground:false});}
 export function audioFile(pcm:Float32Array){
   const file=new File(Paths.cache,`qa-${Date.now()}-${Math.random().toString(16).slice(2)}.wav`);
-  try{file.create();file.write(wav(pcm));return file;}catch(error){try{file.delete();}catch{}throw error;}
+  // SDK 58 writes asynchronously by default. Publish the URI only after the
+  // complete WAV has been written, before a native player can open the file.
+  try{file.create();file.writeSync(wav(pcm));return file;}catch(error){try{file.delete();}catch{}throw error;}
 }
 export function startDrone(settings:Settings){
   const file=audioFile(renderDrone(settings));

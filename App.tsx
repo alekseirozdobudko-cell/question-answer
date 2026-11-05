@@ -1,12 +1,17 @@
 import React, {useEffect,useRef,useState} from 'react';
 import {AppState,View,Text,Pressable,ScrollView,StyleSheet,Switch,Modal,useWindowDimensions,Platform,Linking} from 'react-native';
 import {StatusBar} from 'expo-status-bar';
-import {CHORDS,SCALES,ROOTS,LEVELS,DEFAULTS,formula,pool,rangeError,generate,preset,tetrachordFormula,type Settings,type Phrase} from './src/music';
+import {useKeepAwake} from 'expo-keep-awake';
+import {CHORDS,SCALES,ROOTS,LEVELS,DEFAULTS,formula,pool,rangeError,generate,preset,tetrachordFormula,questionPlayCount,type Settings,type Phrase} from './src/music';
 import * as audio from './src/audio';
 import {readSettings,writeSettings} from './src/storage';
 
 const C={bg:'#F5F4EE',ink:'#232B27',muted:'#778078',line:'#E0E3D9',green:'#D7F27A',deep:'#224F42',paper:'#FFFFFF',amber:'#E9B967'};
 type Bundle={phrase:Phrase;settings:Settings};
+function PracticeScreenAwake(){
+  useKeepAwake(undefined,{suppressDeactivateWarnings:true});
+  return null;
+}
 function Chip({label,selected,onPress,disabled=false}:{label:string;selected?:boolean;onPress:()=>void;disabled?:boolean}){
   return <Pressable accessibilityRole="button" accessibilityState={{selected,disabled}} disabled={disabled} onPress={onPress} style={({pressed})=>[styles.chip,selected&&styles.chipSelected,pressed&&{opacity:.65},disabled&&{opacity:.5}]}><Text style={[styles.chipText,selected&&{color:C.deep}]}>{label}</Text></Pressable>;
 }
@@ -49,7 +54,7 @@ export default function App(){
       },
       progress:seconds=>{
         if(token!==session.current||!current.current)return;
-        setElapsed(seconds);setPhase(s.infiniteMelody||seconds<current.current.phrase.beats*60/s.bpm?'question':'answer');
+        setElapsed(seconds);setPhase(s.infiniteMelody||seconds<current.current.phrase.beats*questionPlayCount(s)*60/s.bpm?'question':'answer');
       },
       error:e=>{if(token===session.current)fail(e);}
     });
@@ -71,11 +76,14 @@ export default function App(){
     try{await audio.initialize();if(token!==session.current||!active.current)return;playSequence(s,token,previousPhrase,true,true,currentPhrase);}catch(e){if(token===session.current)fail(e);}
   }
   const questionBeats=phrase?.beats??settings.bars*4;
-  const secondsPerBeat=60/settings.bpm,questionSeconds=questionBeats*secondsPerBeat,totalSeconds=(questionBeats+(settings.infiniteMelody?0:settings.answerBars*4))*secondsPerBeat;
-  const answer=phase==='answer',phaseTime=answer?elapsed-questionSeconds:elapsed;
+  const plays=questionPlayCount(settings);
+  const secondsPerBeat=60/settings.bpm,questionSeconds=questionBeats*secondsPerBeat;
+  const listeningSeconds=questionSeconds*plays,totalSeconds=listeningSeconds+(settings.infiniteMelody?0:settings.answerBars*4*secondsPerBeat);
+  const answer=phase==='answer',phaseTime=answer?elapsed-listeningSeconds:elapsed%questionSeconds;
   const phaseLength=answer?settings.answerBars*4*secondsPerBeat:questionSeconds;
+  const currentPlay=Math.min(plays,Math.floor(elapsed/questionSeconds)+1);
   const beatIndex=Math.floor(phaseTime/secondsPerBeat)%4;
-  const currentEvent=phase==='question'?phrase?.events.findIndex(e=>elapsed/secondsPerBeat>=e.beat&&elapsed/secondsPerBeat<e.beat+e.duration):-1;
+  const currentEvent=phase==='question'?phrase?.events.findIndex(e=>phaseTime/secondsPerBeat>=e.beat&&phaseTime/secondsPerBeat<e.beat+e.duration):-1;
   const group=(label:string,children:React.ReactNode)=><View style={styles.settingGroup}><Text style={styles.groupLabel}>{label}</Text>{children}</View>;
   const settingsContent=<>
     <View style={styles.panelHeading}><Text style={styles.panelTitle}>Твоя практика</Text><Text style={styles.small}>4/4</Text></View>
@@ -110,6 +118,8 @@ export default function App(){
       <View style={styles.wrap}>{LEVELS.map((l,i)=><Chip key={l} label={`${i+1}. ${l}`} selected={settings.level===i} onPress={()=>{if(!running)setSettings(s=>preset(s,i));}} disabled={running}/>)}</View>
         <Text style={[styles.small,{marginTop:12}]}>{['Ровные четверти и половинные. Близкие ноты.','Тот же ровный пульс; изредка одна пара восьмых. Переходы только к соседней ступени.','Четверти, восьмые и небольшие скачки.','Паузы, пунктир и более длинные фразы.','Синкопы и свободные скачки.','Шестнадцатые, паузы и сложные рисунки.'][settings.level]}</Text>
       <Stepper label="Тактов в вопросе" value={settings.bars} min={1} max={4} onChange={bars=>update({bars})} disabled={running}/>
+      <Stepper label="Проигрываний вопроса" value={plays} min={1} max={8} onChange={questionPlays=>update({questionPlays})} disabled={running}/>
+      <Text style={[styles.small,{marginBottom:8}]}>{settings.infiniteMelody?'Та же фраза звучит выбранное число раз, затем начинается новая.':'Та же фраза звучит выбранное число раз, затем начинается пауза для ответа.'}</Text>
       <Stepper label="Нот на такт, до" value={settings.density} min={2} max={12} onChange={density=>update({density})} disabled={running}/>
       <Stepper label="Тактов на ответ" value={settings.answerBars} min={1} max={8} onChange={answerBars=>update({answerBars})} disabled={running||settings.infiniteMelody}/>
     </>)}
@@ -123,11 +133,11 @@ export default function App(){
       <View style={[styles.wrap,{marginTop:12}]}>{(["Чистый","Тёплый","Квинта"] as const).map((label,droneTone)=><Chip key={label} label={label} selected={settings.droneTone===droneTone} onPress={()=>update({droneTone})} disabled={running}/>)}</View>
       <Text style={[styles.small,{marginTop:8}]}>Выбери тембр тоники. Дрон звучит без пауз, пока идёт упражнение.</Text>
       <View style={styles.wrap}>{[.25,.5,.75,1].map(volume=><Chip key={volume} label={`${volume*100}%`} selected={settings.volume===volume} onPress={()=>update({volume})} disabled={running}/>)}</View>
-      <Text style={[styles.small,{marginTop:9}]}>Громкость баса и метронома</Text>
+      <Text style={[styles.small,{marginTop:9}]}>Громкость инструмента и метронома</Text>
     </>)}
     <Pressable accessibilityRole="button" disabled={running} onPress={()=>setSettings({...DEFAULTS})}><Text style={styles.reset}>Сбросить настройки</Text></Pressable>
   </>;
-  return <View style={styles.root}><StatusBar style="dark"/><ScrollView contentContainerStyle={[styles.page,{paddingHorizontal:wide?36:18}]}>
+  return <View style={styles.root}>{running&&<PracticeScreenAwake/>}<StatusBar style="dark"/><ScrollView contentContainerStyle={[styles.page,{paddingHorizontal:wide?36:18}]}>
     <View style={[styles.header,!wide&&{marginBottom:18,paddingBottom:18}]}><View style={styles.brand}><View style={styles.logo}><Text style={styles.logoText}>Q:A</Text></View><View><Text style={styles.brandName}>Question and Answer</Text><Text style={styles.brandSub}>ВОПРОС-ОТВЕТ / MUSIC PRACTICE</Text></View></View>{wide?<View style={styles.instrument}><View style={styles.dot}/><Text style={styles.small}>{settings.instrument==='synth2'?'Синтезатор 2 · A0–C8':settings.instrument==='synth1'?'Синтезатор 1 · A0–C8':settings.instrument==='piano'?'Пианино · A0-C8':settings.instrument==='acousticGuitar'?'6 струн · E A D G B E':'4 струны · E A D G'}</Text></View>:null}</View>
     <View style={[styles.layout,wide&&{flexDirection:'row',alignItems:'flex-start'}]}>
       <View style={styles.main}>
@@ -137,10 +147,11 @@ export default function App(){
         {!wide&&<Pressable accessibilityRole="button" onPress={()=>setShowSettings(true)} style={styles.mobileSettings}><Text style={styles.selectText}>Настроить практику</Text><Text>☷</Text></Pressable>}
         <View style={[styles.sessionCard,!wide&&{padding:18},answer&&{backgroundColor:'#244E42'}]}>
           <View style={styles.sessionTop}><View style={styles.statusPill}><View style={[styles.dot,{backgroundColor:answer?C.amber:C.green}]}/><Text style={styles.statusText}>{phase==='loading'?'ГОТОВИМ ЗВУК':answer?'ТВОЙ ОТВЕТ':settings.infiniteMelody?'МЕЛОДИЯ ЗВУЧИТ':phase==='question'?'СЛУШАЙ ФРАЗУ':'ГОТОВ К ПРАКТИКЕ'}</Text></View><Text style={styles.sessionCounter}>ФРАЗА {String(count).padStart(2,'0')}</Text></View>
-          <View style={[styles.sessionCenter,!wide&&{marginTop:18,marginBottom:16}]}><Text style={styles.sessionTitle}>{settings.infiniteMelody?(running?'Лови движение мелодии':'Начни слушать'):answer?'Теперь сыграй ты':phase==='question'?'Поймай мелодию':phase==='loading'?'Один момент…':'Начни с одного вопроса'}</Text><Text style={styles.sessionHint}>{settings.infiniteMelody?(running?'Фразы идут одна за другой. Ноты можно подсмотреть ниже.':'Фразы будут сменять друг друга без пауз — слушай, какие идеи они подсказывают.'):answer?'Повтори на басу и сверь ноты ниже.':phase==='question'?'Слушай, не глядя на экран.':'Ноты останутся на экране для самопроверки.'}</Text></View>
+          <View style={[styles.sessionCenter,!wide&&{marginTop:18,marginBottom:16}]}><Text style={styles.sessionTitle}>{settings.infiniteMelody?(running?'Лови движение мелодии':'Начни слушать'):answer?'Теперь твой ответ':phase==='question'?'Поймай мелодию':phase==='loading'?'Один момент…':'Начни с одного вопроса'}</Text><Text style={styles.sessionHint}>{settings.infiniteMelody?(running?'Фразы идут одна за другой. Ноты можно подсмотреть ниже.':'Фразы будут сменять друг друга без пауз — слушай, какие идеи они подсказывают.'):answer?'Сыграй или спой и сверь ноты ниже.':phase==='question'?'Слушай, не глядя на экран.':'Ноты останутся на экране для самопроверки.'}</Text></View>
+          {phase==='question'&&plays>1&&<Text style={[styles.sessionHint,{textAlign:'center',marginBottom:14}]}>Проигрывание {currentPlay} из {plays}</Text>}
           <View style={[styles.beats,!wide&&{marginBottom:16}]}>{[0,1,2,3].map(i=><View key={i} style={[styles.beat,running&&phase!=='loading'&&beatIndex===i&&{backgroundColor:answer?C.amber:C.green,borderColor:'transparent'}]}><Text style={[styles.beatText,running&&phase!=='loading'&&beatIndex===i&&{color:C.ink}]}>{i+1}</Text></View>)}</View>
           <View style={styles.timeline}><View style={[styles.timelineFill,{width:`${running?Math.min(100,elapsed/totalSeconds*100):0}%`,backgroundColor:answer?C.amber:C.green}]}/></View>
-          <View style={styles.timeLabels}><Text style={styles.timeLabel}>{settings.infiniteMelody?`${settings.bars} т. · бесконечная мелодия`:`${settings.bars} т. вопрос → ${settings.answerBars} т. ответ`}</Text><Text style={styles.timeLabel}>{running&&phase!=='loading'?`${Math.max(0,Math.ceil(phaseLength-phaseTime))} сек. · такт ${Math.floor(phaseTime/secondsPerBeat/4)+1}`:`${settings.bpm} BPM · бесконечный цикл`}</Text></View>
+          <View style={styles.timeLabels}><Text style={styles.timeLabel}>{settings.infiniteMelody?`${settings.bars} т. × ${plays} · бесконечная мелодия`:`${settings.bars} т. × ${plays} → ${settings.answerBars} т. ответ`}</Text><Text style={styles.timeLabel}>{running&&phase!=='loading'?`${Math.max(0,Math.ceil(phaseLength-phaseTime))} сек. · такт ${Math.floor(phaseTime/secondsPerBeat/4)+1}`:`${settings.bpm} BPM · бесконечный цикл`}</Text></View>
           <View style={styles.transport}><Pressable accessibilityRole="button" accessibilityLabel={running?'Стоп':'Начать практику'} disabled={!running&&!!problem} onPress={running?stop:start} style={({pressed})=>[styles.startButton,!wide&&{paddingHorizontal:12,paddingVertical:14},pressed&&{opacity:.8},!!problem&&!running&&{opacity:.4}]}><Text style={[styles.startText,!wide&&{fontSize:13}]}>{running?'■  Стоп':'▶  Начать практику'}</Text></Pressable><Pressable accessibilityRole="button" accessibilityLabel={settings.infiniteMelody?'Повторить фразу':'Повторить вопрос'} disabled={!phrase||phase==='loading'} onPress={repeat} style={[styles.repeatButton,!wide&&{paddingHorizontal:12,paddingVertical:14},(!phrase||phase==='loading')&&{opacity:.35}]}><Text style={[styles.repeatText,!wide&&{fontSize:13}]}>↻  Повторить</Text></Pressable><Pressable accessibilityRole="button" accessibilityLabel="Предыдущая фраза" disabled={!running||!canGoPrevious||phase==='loading'} onPress={goPrevious} style={[styles.repeatButton,!wide&&{paddingHorizontal:12,paddingVertical:14},(!running||!canGoPrevious||phase==='loading')&&{opacity:.35}]}><Text style={[styles.repeatText,!wide&&{fontSize:13}]}>← Предыдущая</Text></Pressable></View>
         </View>
         {!!error&&<Text accessibilityRole="alert" style={styles.error}>Звук остановлен: {error}</Text>}

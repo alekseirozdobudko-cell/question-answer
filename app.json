@@ -1,1 +1,34 @@
-{"expo":{"name":"Question and Answer","slug":"question-and-answer","version":"1.0.1","orientation":"portrait","userInterfaceStyle":"light","platforms":["android","ios","web"],"android":{"package":"com.alex.questionanswer","versionCode":2},"web":{"bundler":"metro","name":"Question and Answer","shortName":"Q&A"}}}
+{
+  "expo": {
+    "name": "Question and Answer",
+    "slug": "question-and-answer",
+    "version": "1.0.1",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "platforms": [
+      "android",
+      "ios",
+      "web"
+    ],
+    "android": {
+      "package": "com.alex.questionanswer",
+      "versionCode": 2
+    },
+    "web": {
+      "bundler": "metro",
+      "name": "Question and Answer",
+      "shortName": "Q&A"
+    },
+    "plugins": [
+      [
+        "expo-audio",
+        {
+          "microphonePermission": false,
+          "recordAudioAndroid": false,
+          "enableBackgroundPlayback": false
+        }
+      ],
+      "expo-status-bar"
+    ]
+  }
+}

@@ -22,8 +22,16 @@ export function playSequence(settings:Settings,callbacks:SequenceCallbacks){
     timer=undefined;if(stopped||!playlist)return;
     maintaining=true;
     try{
-      while(playlist.currentIndex>0){playlist.remove(0);const previous=entries.shift()!;try{previous.file.delete();}catch{}}
-      while(entries.length<3){const entry=makeEntry();entries.push(entry);playlist.add({uri:entry.file.uri});}
+      const consumed=playlist.currentIndex;
+      const missing=3-(entries.length-consumed);
+      for(let i=0;i<missing;i++){
+        const entry=makeEntry();entries.push(entry);playlist.add({uri:entry.file.uri});
+      }
+      // Refill before pruning. The snapshot remains safe if native playback
+      // advances while JavaScript is rendering the next audio block.
+      for(let i=0;i<consumed;i++){
+        playlist.remove(0);const previous=entries.shift()!;try{previous.file.delete();}catch{}
+      }
     }catch(error){stop();callbacks.error(error);}finally{maintaining=false;}
   };
   try{

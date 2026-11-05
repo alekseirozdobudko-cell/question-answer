@@ -38,8 +38,12 @@ export const SCALES = [
 ];
 export const ROOTS = ['C','D♭','D','E♭','E','F','F♯','G','A♭','A','B♭','B'];
 export const LEVELS = ['Первые шаги','Плавный переход','Простой','Средний','Сложный','Эксперт'];
-export type Settings = { instrument: 'bass'|'acousticGuitar'|'synth1'|'synth2'|'piano'; mode: 'chord'|'scale'|'tetrachord'|'custom'; root: number; chord: number; scale: number; tetrachord: number; customRoots: number[]; custom: number[]; octave: number; octaves: number; bars: number; answerBars: number; infiniteMelody: boolean; bpm: number; level: number; density: number; metro: boolean; metroDuringAnswer: boolean; drone: boolean; droneTone: number; volume: number };
-export const DEFAULTS: Settings = { instrument:'bass',mode:'chord',root:0,chord:0,scale:0,tetrachord:0,customRoots:[0],custom:[0,4,7],octave:2,octaves:1,bars:1,answerBars:2,infiniteMelody:false,bpm:80,level:0,density:3,metro:true,metroDuringAnswer:true,drone:false,droneTone:1,volume:0.75 };
+export type Settings = { instrument: 'bass'|'acousticGuitar'|'synth1'|'synth2'|'piano'; mode: 'chord'|'scale'|'tetrachord'|'custom'; root: number; chord: number; scale: number; tetrachord: number; customRoots: number[]; custom: number[]; octave: number; octaves: number; bars: number; questionPlays: number; answerBars: number; infiniteMelody: boolean; bpm: number; level: number; density: number; metro: boolean; metroDuringAnswer: boolean; drone: boolean; droneTone: number; volume: number };
+export const DEFAULTS: Settings = { instrument:'bass',mode:'chord',root:0,chord:0,scale:0,tetrachord:0,customRoots:[0],custom:[0,4,7],octave:2,octaves:1,bars:1,questionPlays:1,answerBars:2,infiniteMelody:false,bpm:80,level:0,density:3,metro:true,metroDuringAnswer:true,drone:false,droneTone:1,volume:0.75 };
+export function questionPlayCount(s:Settings):number {
+  const value=s.questionPlays;
+  return Number.isInteger(value)&&value>=1&&value<=8?value:DEFAULTS.questionPlays;
+}
 export type Note = { midi: number; name: string; octave: number; degree: string };
 export type Event = { beat: number; duration: number; note: Note | null };
 export type Phrase = { events: Event[]; beats: number };

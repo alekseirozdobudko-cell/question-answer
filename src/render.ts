@@ -141,7 +141,7 @@ export function render(phrase: Phrase,s: Settings,beatOffset=0): Float32Array {
     if(s.instrument==='piano'){
       const pcm=pianoSample(midi);if(!pcm)continue;
       const sampleLength=Math.min(pcm.length,out.length-start);
-      for(let i=0;i<sampleLength;i++)out[start+i]+=pcm[i]*Math.min(1,i/12)*s.volume*1.8;
+      for(let i=0;i<sampleLength;i++)out[start+i]+=pcm[i]*Math.min(1,i/12)*s.volume*.9;
       continue;
     }
 

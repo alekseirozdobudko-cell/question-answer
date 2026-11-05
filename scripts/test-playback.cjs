@@ -51,25 +51,59 @@ async function test(){
  const lateStop=web.playSequence(settings,{next,phrase(){},progress(){},error:e=>errors.push(e)});
  Context.instance.currentTime+=10;tick();assert.equal(errors.length,1,'an underrun reports an error and stops');lateStop();
 
- let pending,startup,playlist,files=new Set(),created=0;
+ let pending,startup,playlist,files=new Map(),created=0;
+ let queuedFileDeletes=[],nativeRenderHook,failWrites=false;
  class File{
   constructor(root,name){this.uri=name;}
-  create(){files.add(this.uri);}
-  write(){}
-  delete(){files.delete(this.uri);}
+  get exists(){return files.has(this.uri);}
+  create(){files.set(this.uri,new Uint8Array());}
+  // Model SDK 58's background write as unfinished when the player opens a URI.
+  write(){return new Promise(()=>{});}
+  writeSync(content){
+   if(failWrites)throw new Error('Disk write failed');
+   files.set(this.uri,typeof content==='string'?content:Uint8Array.from(content));
+  }
+  textSync(){return files.get(this.uri);}
+  delete(){
+   if(playlist?.sources.some(source=>source.uri===this.uri))queuedFileDeletes.push(this.uri);
+   files.delete(this.uri);
+  }
+ }
+ function assertWaveSource(source){
+  const bytes=files.get(source.uri);
+  assert.ok(bytes instanceof Uint8Array&&bytes.length>44,'native player only receives a completely written WAV');
+  const data=Buffer.from(bytes);
+  assert.equal(data.toString('ascii',0,4),'RIFF');assert.equal(data.toString('ascii',8,12),'WAVE');
+  assert.equal(data.readUInt32LE(4)+8,data.length,'RIFF size matches the actual file');
+  assert.equal(data.readUInt16LE(20),1,'PCM format');assert.equal(data.readUInt16LE(22),1,'mono');
+  assert.equal(data.readUInt32LE(24),SAMPLE_RATE);assert.equal(data.readUInt16LE(34),16);
+  assert.equal(data.toString('ascii',36,40),'data');
+  assert.equal(data.readUInt32LE(40)+44,data.length,'PCM data is complete before queue insertion');
  }
  const nativeMocks={
   ...mockSequence,
-  'expo-file-system':{File,Paths:{cache:'cache'}},
+  './sequence':{createSequenceRenderer:()=>()=>{nativeRenderHook?.();return chunk();}},
+  'expo-file-system':{File,Paths:{cache:'cache',document:'document'}},
   'expo-audio':{setAudioModeAsync:async()=>{},createAudioPlaylist:options=>{
+   options.sources.forEach(assertWaveSource);
    created++;playlist={sources:[...options.sources],currentIndex:0,currentTime:0,isLoaded:false,isBuffering:true,currentStatus:{},
     addListener(event,listener){this.listener=listener;return {remove:()=>{this.listener=undefined;}};},
-    add(source){this.sources.push(source);},remove(index){this.sources.splice(index,1);this.currentIndex--;},
+    add(source){assertWaveSource(source);this.sources.push(source);},remove(index){this.sources.splice(index,1);this.currentIndex--;},
     play(){this.playing=true;},clear(){this.playing=false;this.sources=[];},destroy(){this.destroyed=true;},release(){this.released=true;}
    };return playlist;
   }}
  };
  nativeMocks['./audio-native']=loadAudio('audio-native.ts',nativeMocks,{});
+ const completeFile=nativeMocks['./audio-native'].audioFile(new Float32Array([0,.25,-.25]));
+ assertWaveSource({uri:completeFile.uri});completeFile.delete();
+ failWrites=true;
+ assert.throws(()=>nativeMocks['./audio-native'].audioFile(new Float32Array(4)),/Disk write failed/);
+ assert.equal(files.size,0,'a failed synchronous write removes its incomplete audio file');
+ failWrites=false;
+ const storage=loadAudio('storage.ts',nativeMocks,{});
+ storage.writeSettings({bpm:80});storage.writeSettings({bpm:120});
+ assert.equal(storage.readSettings().bpm,120,'settings writes complete in order before the next read');
+ files.clear();
  const native=loadAudio('audio.android.ts',nativeMocks,{setTimeout:(fn,ms)=>ms===10000?(startup=fn,2):(pending=fn,1),clearTimeout:id=>{if(id===2)startup=undefined;else if(id===1)pending=undefined;}});
  seen=[];errors=[];
  const nativeStop=native.playSequence(settings,{next,phrase:p=>seen.push(p.id),progress(){},error:e=>errors.push(e)});
@@ -80,13 +114,16 @@ async function test(){
  playlist.isBuffering=false;playlist.listener({});
  assert.equal(seen.length,1);assert.ok(playlist.playing);assert.equal(startup,undefined);
  for(let boundary=1;boundary<=20;boundary++){
-  playlist.currentIndex=1;playlist.listener({currentIndex:1,currentTime:0});
+  playlist.currentIndex++;
+  const transitionIndex=playlist.currentIndex;
+  playlist.listener({currentIndex:transitionIndex,currentTime:0});
   const maintain=pending;pending=undefined;maintain();
   // A status emitted before pruning must not announce a future phrase.
-  playlist.listener({currentIndex:1,currentTime:0});
+  playlist.listener({currentIndex:transitionIndex,currentTime:0});
   assert.equal(seen.length,boundary+1);
-  assert.equal(playlist.sources.length,3,'native queue stays bounded');
-  assert.equal(files.size,3,'consumed WAV files are deleted');
+  assert.equal(playlist.sources.length,3,'native queue retains the current track and two future tracks');
+  assert.equal(files.size,3,'consumed WAV files are removed with bounded storage');
+  assert.equal(queuedFileDeletes.length,0,'queued audio files are never deleted');
  }
  assert.equal(created,1,'phrase boundaries never create another native player');
  assert.equal(errors.length,0);nativeStop();nativeStop();
@@ -99,6 +136,25 @@ async function test(){
  native.playSequence(settings,{next,phrase(){},progress(){},error:e=>errors.push(e)});
  const startupTimeout=startup;startupTimeout();
  assert.equal(errors.length,1,'a player that never becomes ready reports an error');assert.equal(files.size,0);
- console.log('Playback validated: prepared piano keys, native readiness, startup cancellation/timeout, 20 transitions and resource cleanup.');
+ seen=[];errors=[];
+ const advancingStop=native.playSequence(settings,{next,phrase:p=>seen.push(p.id),progress(){},error:e=>errors.push(e)});
+ playlist.isLoaded=true;playlist.isBuffering=false;playlist.listener({});
+ playlist.currentIndex=1;playlist.listener({});
+ nativeRenderHook=()=>{nativeRenderHook=undefined;playlist.currentIndex=2;};
+ let refill=pending;pending=undefined;refill();
+ playlist.listener({currentIndex:1});
+ assert.equal(seen.length,3,'live cursor catches a second transition during audio generation');
+ refill=pending;pending=undefined;refill();
+ playlist.listener({currentIndex:2});
+ assert.equal(seen.length,3,'a delayed status after pruning never advances the phrase again');
+ assert.equal(playlist.currentIndex,0);assert.equal(playlist.sources.length,3);
+ assert.equal(errors.length,0);advancingStop();assert.equal(files.size,0);
+ native.playSequence(settings,{next,phrase(){},progress(){},error:e=>errors.push(e)});
+ const failedListener=playlist.listener;
+ failedListener({error:{message:'Source error',code:3003}});
+ failedListener({error:{message:'Source error',code:3003}});
+ assert.equal(errors.length,1,'a native source failure is reported once through the app error handler');
+ assert.equal(errors[0].message,'Source error');assert.equal(files.size,0);assert.ok(playlist.released);
+ console.log('Playback validated: completed WAV writes, ordered settings writes, prepared piano keys, native readiness, startup cancellation/timeout, 20 transitions, advancement during rendering, native errors and resource cleanup.');
 }
 test().catch(error=>{console.error(error);process.exitCode=1;});
